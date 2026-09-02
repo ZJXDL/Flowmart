@@ -1,0 +1,19 @@
+{
+  "name": "atlas-postgres-cdc",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "debezium",
+    "database.password": "debezium_dev_password",
+    "database.dbname": "atlas",
+    "topic.prefix": "atlas",
+    "plugin.name": "pgoutput",
+    "publication.name": "atlas_publication",
+    "slot.name": "atlas_debezium_slot",
+    "publication.autocreate.mode": "disabled",
+    "snapshot.mode": "initial",
+    "schema.include.list": "public",
+    "include.schema.changes": "false"
+  }
+}
