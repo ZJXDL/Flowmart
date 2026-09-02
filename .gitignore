@@ -5,3 +5,7 @@ __pycache__/
 .idea/
 .vscode/
 .DS_Store
+
+# Flink build artifacts
+pipelines/bronze/build/
+pipelines/bronze/flink-table-api-java-uber-2.1.0.jar
