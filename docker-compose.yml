@@ -39,6 +39,25 @@ services:
     networks:
       - atlas-network
 
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:latest
+    container_name: atlas-iceberg-rest
+    restart: unless-stopped
+    depends_on:
+      - minio
+    ports:
+      - "8181:8181"
+    environment:
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_ACCESS__KEY__ID: ${MINIO_ROOT_USER}
+      CATALOG_S3_SECRET__ACCESS__KEY: ${MINIO_ROOT_PASSWORD}
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+    networks:
+      - atlas-network
+
   kafka:
     image: apache/kafka:4.1.0
     container_name: atlas-kafka
@@ -127,6 +146,10 @@ services:
       - ./infrastructure/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:ro
       - ./infrastructure/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:ro
       - ./infrastructure/flink/lib/kafka-clients-4.2.0.jar:/opt/flink/lib/kafka-clients-4.2.0.jar:ro
+      - ./infrastructure/flink/lib/iceberg-flink-runtime-2.1-1.11.0.jar:/opt/flink/lib/iceberg-flink-runtime-2.1-1.11.0.jar:ro
+      - ./infrastructure/flink/lib/iceberg-aws-bundle-1.11.0.jar:/opt/flink/lib/iceberg-aws-bundle-1.11.0.jar:ro
+      - ./infrastructure/flink/lib/hadoop-client-api-3.4.3.jar:/opt/flink/lib/hadoop-client-api-3.4.3.jar:ro
+      - ./infrastructure/flink/lib/hadoop-client-runtime-3.4.3.jar:/opt/flink/lib/hadoop-client-runtime-3.4.3.jar:ro
       - ./pipelines/bronze/atlas-bronze-udf.jar:/opt/flink/lib/atlas-bronze-udf.jar:ro
     networks:
       - atlas-network
@@ -147,6 +170,10 @@ services:
       - ./infrastructure/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:ro
       - ./infrastructure/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:ro
       - ./infrastructure/flink/lib/kafka-clients-4.2.0.jar:/opt/flink/lib/kafka-clients-4.2.0.jar:ro
+      - ./infrastructure/flink/lib/iceberg-flink-runtime-2.1-1.11.0.jar:/opt/flink/lib/iceberg-flink-runtime-2.1-1.11.0.jar:ro
+      - ./infrastructure/flink/lib/iceberg-aws-bundle-1.11.0.jar:/opt/flink/lib/iceberg-aws-bundle-1.11.0.jar:ro
+      - ./infrastructure/flink/lib/hadoop-client-api-3.4.3.jar:/opt/flink/lib/hadoop-client-api-3.4.3.jar:ro
+      - ./infrastructure/flink/lib/hadoop-client-runtime-3.4.3.jar:/opt/flink/lib/hadoop-client-runtime-3.4.3.jar:ro
       - ./pipelines/bronze/atlas-bronze-udf.jar:/opt/flink/lib/atlas-bronze-udf.jar:ro
     networks:
       - atlas-network
