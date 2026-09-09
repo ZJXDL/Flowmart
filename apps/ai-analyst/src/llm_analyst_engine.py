@@ -1,4 +1,6 @@
+
 from pathlib import Path
+import argparse
 import sys
 
 
@@ -64,11 +66,6 @@ class LLMAnalystEngine:
     analytically useful.
     """
 
-    # Maximum number of rows exposed to the answer-generation LLM.
-    #
-    # This does NOT truncate the actual analytical result returned
-    # by ask(). It only limits the amount of row-level data included
-    # in the natural-language answer prompt.
     MAX_LLM_PREVIEW_ROWS = 10
 
     def __init__(
@@ -110,15 +107,6 @@ class LLMAnalystEngine:
         """
         Identify the first numeric metric column that can be used
         to rank a large analytical result.
-
-        The semantic query builder places dimensions before metrics,
-        so the first numeric column encountered is normally the
-        first requested metric.
-
-        Returns:
-
-            column name
-            or None if no numeric ranking column exists.
         """
 
         if not isinstance(columns, list):
@@ -144,6 +132,7 @@ class LLMAnalystEngine:
                         str(value)
                         .replace(",", "")
                     )
+
                     return column
 
                 except (ValueError, TypeError):
@@ -156,9 +145,6 @@ class LLMAnalystEngine:
         """
         Convert a result value into a numeric value suitable
         for deterministic descending ranking.
-
-        Returns None when the value cannot be interpreted as
-        a number.
         """
 
         if value is None:
@@ -189,34 +175,6 @@ class LLMAnalystEngine:
         For large result sets, the top
         MAX_LLM_PREVIEW_ROWS rows are selected according to
         the first numeric metric column.
-
-        Example:
-
-            customer_id | total_revenue
-            ----------------------------
-            A           | 100
-            B           | 900
-            C           | 500
-            ...
-
-        becomes a presentation result ordered by:
-
-            900
-            500
-            100
-            ...
-
-        while the complete original result remains unchanged.
-
-        This makes statements such as:
-
-            "Top 10 customers by revenue"
-
-        meaningful rather than presenting arbitrary rows.
-
-        If no numeric ranking column can be identified, the method
-        falls back to the first N rows and explicitly labels the
-        result as a bounded preview rather than a top-N ranking.
         """
 
         if row_count <= self.MAX_LLM_PREVIEW_ROWS:
@@ -262,9 +220,6 @@ class LLMAnalystEngine:
                     )
                 )
 
-            # Deterministic descending order.
-            #
-            # The original row index is used as a stable tie-breaker.
             sortable_rows.sort(
                 key=lambda item: (
                     -item[0],
@@ -298,14 +253,6 @@ class LLMAnalystEngine:
                 "ranking_column": metric_column,
                 "ranking_order": "descending",
             }
-
-        # ---------------------------------------------------------
-        # FALLBACK
-        # ---------------------------------------------------------
-        #
-        # If the result has no numeric ranking column, do not invent
-        # a ranking. Preserve the old bounded-preview behavior.
-        # ---------------------------------------------------------
 
         preview_rows = rows[
             :self.MAX_LLM_PREVIEW_ROWS
@@ -351,34 +298,11 @@ class LLMAnalystEngine:
             filters=intent.filters,
         )
 
-        # ---------------------------------------------------------
-        # COMPLETE TRUSTED RESULT
-        # ---------------------------------------------------------
-        #
-        # This is the authoritative analytical result.
-        #
-        # Nothing is truncated here.
-        # ---------------------------------------------------------
-
         complete_result = {
             "columns": response["columns"],
             "rows": response["rows"],
             "row_count": response["row_count"],
         }
-
-        # ---------------------------------------------------------
-        # BOUNDED RESULT FOR LLM NARRATION
-        # ---------------------------------------------------------
-        #
-        # Large dimensional queries can contain hundreds or
-        # thousands of rows.
-        #
-        # The answer LLM does not need every row to explain the
-        # result. Sending every row can exceed provider token
-        # limits.
-        #
-        # The complete result remains available above.
-        # ---------------------------------------------------------
 
         llm_result = (
             self._prepare_result_for_llm(
@@ -402,16 +326,9 @@ class LLMAnalystEngine:
             "metrics": response["metrics"],
             "dimensions": response["dimensions"],
             "filters": response["filters"],
-
-            # -----------------------------------------------------
-            # IMPORTANT:
-            # These are the COMPLETE analytical results.
-            # -----------------------------------------------------
-
-            "columns": response["columns"],
-            "rows": response["rows"],
-            "row_count": response["row_count"],
-
+            "columns": complete_result["columns"],
+            "rows": complete_result["rows"],
+            "row_count": complete_result["row_count"],
             "answer": answer,
         }
 
@@ -423,21 +340,7 @@ class MockCombinedLLMClient(LLMClient):
         1. Intent interpretation
         2. Answer generation
 
-    This is used only for development and integration tests.
-
-    IMPORTANT:
-
-    The mock does NOT classify requests by fragile natural-language
-    phrases in the system prompt.
-
-    Instead, it checks the structure of the user prompt.
-
-    Intent requests do not contain a "trusted_result" field.
-
-    Answer-generation requests do contain a "trusted_result" field.
-
-    This keeps the integration tests stable even when prompts are
-    hardened or rewritten.
+    Used for development and CI-safe tests.
     """
 
     def __init__(
@@ -463,14 +366,7 @@ class MockCombinedLLMClient(LLMClient):
 
             - intent interpretation
             - analytical answer generation
-
-        The request type is determined from the payload structure,
-        not from arbitrary prompt wording.
         """
-
-        # ---------------------------------------------------------
-        # Answer-generation requests
-        # ---------------------------------------------------------
 
         if '"trusted_result"' in user_prompt:
 
@@ -487,10 +383,6 @@ class MockCombinedLLMClient(LLMClient):
                 "No mock answer response configured."
             )
 
-        # ---------------------------------------------------------
-        # Intent interpretation requests
-        # ---------------------------------------------------------
-
         for question, response in (
             self.intent_responses.items()
         ):
@@ -502,28 +394,10 @@ class MockCombinedLLMClient(LLMClient):
         )
 
 
-def run_tests():
+def build_test_engine():
     """
-    Run end-to-end integration tests using deterministic
-    mock LLM responses.
-
-    These tests exercise:
-
-        Natural language
-            ↓
-        Intent interpreter
-            ↓
-        Semantic validation
-            ↓
-        Query builder
-            ↓
-        Trino
-            ↓
-        Bounded answer result
-            ↓
-        Answer generator
-            ↓
-        Numeric validation
+    Build a deterministic engine for tests that do not require
+    live LLM or Trino infrastructure.
     """
 
     intent_responses = {
@@ -563,15 +437,525 @@ def run_tests():
         answer_responses=answer_responses,
     )
 
-    engine = LLMAnalystEngine(
-        llm_client=client
+    return (
+        LLMAnalystEngine(
+            llm_client=client
+        ),
+        client,
+    )
+
+
+def run_static_tests():
+    """
+    Run deterministic tests that do not require Docker, Trino,
+    or external LLM APIs.
+
+    These tests are safe for GitHub Actions.
+    """
+
+    engine, client = build_test_engine()
+
+    print(
+        "FLOWMART AI ANALYST — STATIC TESTS"
+    )
+    print(
+        "================================="
+    )
+
+    # =============================================================
+    # TEST 1 — HALLUCINATION PROTECTION
+    # =============================================================
+
+    print(
+        "\nTest 1 — Hallucination Protection"
+    )
+
+    hallucinating_client = (
+        MockCombinedLLMClient(
+            intent_responses={
+                "What is our profit margin?":
+                    '{"metrics":["profit_margin"],'
+                    '"dimensions":[],"filters":{}}'
+            },
+            answer_responses={},
+        )
+    )
+
+    hallucination_interpreter = (
+        LLMIntentInterpreter(
+            llm_client=hallucinating_client,
+            semantic_registry=(
+                SemanticRegistry()
+            ),
+        )
+    )
+
+    try:
+        hallucination_interpreter.interpret(
+            "What is our profit margin?"
+        )
+
+        print(
+            "[FAIL] Hallucinated intent was accepted."
+        )
+
+        return False
+
+    except ValueError as error:
+        print(
+            "[PASS] Hallucinated intent blocked:"
+        )
+        print(
+            error
+        )
+
+    # =============================================================
+    # TEST 2 — MOCK REQUEST ROUTING
+    # =============================================================
+
+    print(
+        "\nTest 2 — Mock Request Routing"
+    )
+
+    routing_client = (
+        MockCombinedLLMClient(
+            intent_responses={
+                "ROUTING INTENT TEST":
+                    '{"metrics":["total_revenue"],'
+                    '"dimensions":[],"filters":{}}'
+            },
+            answer_responses={
+                "ROUTING ANSWER TEST":
+                    "Revenue was $4,967,781.58."
+            },
+        )
+    )
+
+    intent_result = routing_client.generate(
+        system_prompt="Any intent prompt.",
+        user_prompt=(
+            "Interpret this question: "
+            "ROUTING INTENT TEST"
+        ),
+    )
+
+    assert (
+        intent_result
+        == '{"metrics":["total_revenue"],'
+        '"dimensions":[],"filters":{}}'
+    )
+
+    answer_result = routing_client.generate(
+        system_prompt="Any answer prompt.",
+        user_prompt=(
+            '{'
+            '"question": "ROUTING ANSWER TEST",'
+            '"intent": {},'
+            '"trusted_result": {'
+            '"columns": ["total_revenue"],'
+            '}'
+            '}'
+        ),
+    )
+
+    assert (
+        answer_result
+        == "Revenue was $4,967,781.58."
     )
 
     print(
-        "FLOWMART END-TO-END AI ANALYST"
+        "[PASS] Mock intent/answer routing is stable."
+    )
+
+    # =============================================================
+    # TEST 3 — LARGE RESULT PRESENTATION BOUNDARY
+    # =============================================================
+
+    print(
+        "\nTest 3 — Large Result Presentation Boundary"
+    )
+
+    large_rows = []
+
+    for index in range(25):
+        large_rows.append(
+            {
+                "customer_id":
+                    f"customer-{index}",
+                "total_revenue":
+                    str(index * 100),
+            }
+        )
+
+    compact_result = (
+        engine._prepare_result_for_llm(
+            columns=[
+                "customer_id",
+                "total_revenue",
+            ],
+            rows=large_rows,
+            row_count=25,
+        )
+    )
+
+    assert (
+        len(compact_result["rows"])
+        == 10
+    )
+
+    assert (
+        compact_result["row_count"]
+        == 25
+    )
+
+    assert (
+        compact_result["is_preview"]
+        is True
+    )
+
+    assert (
+        compact_result["preview_row_count"]
+        == 10
+    )
+
+    assert (
+        compact_result["omitted_row_count"]
+        == 15
+    )
+
+    assert (
+        compact_result["preview_type"]
+        == "top_n"
+    )
+
+    assert (
+        compact_result["ranking_column"]
+        == "total_revenue"
+    )
+
+    assert (
+        compact_result["ranking_order"]
+        == "descending"
+    )
+
+    expected_revenues = [
+        str(index * 100)
+        for index in range(24, 14, -1)
+    ]
+
+    actual_revenues = [
+        row["total_revenue"]
+        for row in compact_result["rows"]
+    ]
+
+    assert (
+        actual_revenues
+        == expected_revenues
+    )
+
+    assert (
+        len(large_rows)
+        == 25
+    )
+
+    assert (
+        large_rows[0]["total_revenue"]
+        == "0"
+    )
+
+    assert (
+        large_rows[-1]["total_revenue"]
+        == "2400"
+    )
+
+    print(
+        "[PASS] Large results are bounded for LLM narration "
+        "using deterministic top-N ranking without truncating "
+        "the complete analytical result."
+    )
+
+    # =============================================================
+    # TEST 4 — SMALL RESULT REMAINS COMPLETE
+    # =============================================================
+
+    print(
+        "\nTest 4 — Small Result Remains Complete"
+    )
+
+    small_rows = [
+        {
+            "status": "completed",
+            "total_revenue": "3243235.14",
+        },
+        {
+            "status": "cancelled",
+            "total_revenue": "419671.74",
+        },
+    ]
+
+    compact_result = (
+        engine._prepare_result_for_llm(
+            columns=[
+                "status",
+                "total_revenue",
+            ],
+            rows=small_rows,
+            row_count=2,
+        )
+    )
+
+    assert (
+        compact_result["rows"]
+        == small_rows
+    )
+
+    assert (
+        compact_result["row_count"]
+        == 2
+    )
+
+    assert (
+        compact_result["is_preview"]
+        is False
+    )
+
+    assert (
+        compact_result["preview_type"]
+        == "complete"
+    )
+
+    print(
+        "[PASS] Small results remain complete for the answer LLM."
+    )
+
+    # =============================================================
+    # TEST 5 — TOP-N RANKING WITH DECIMAL VALUES
+    # =============================================================
+
+    print(
+        "\nTest 5 — Top-N Ranking With Decimal Values"
+    )
+
+    decimal_rows = [
+        {
+            "customer_id": "customer-a",
+            "total_revenue": "2549.65",
+        },
+        {
+            "customer_id": "customer-b",
+            "total_revenue": "12089.51",
+        },
+        {
+            "customer_id": "customer-c",
+            "total_revenue": "3659.85",
+        },
+        {
+            "customer_id": "customer-d",
+            "total_revenue": "16784.14",
+        },
+        {
+            "customer_id": "customer-e",
+            "total_revenue": "8219.59",
+        },
+        {
+            "customer_id": "customer-f",
+            "total_revenue": "11019.44",
+        },
+        {
+            "customer_id": "customer-g",
+            "total_revenue": "754.81",
+        },
+        {
+            "customer_id": "customer-h",
+            "total_revenue": "16074.36",
+        },
+        {
+            "customer_id": "customer-i",
+            "total_revenue": "10269.47",
+        },
+        {
+            "customer_id": "customer-j",
+            "total_revenue": "5889.84",
+        },
+        {
+            "customer_id": "customer-k",
+            "total_revenue": "684.89",
+        },
+    ]
+
+    decimal_result = (
+        engine._prepare_result_for_llm(
+            columns=[
+                "customer_id",
+                "total_revenue",
+            ],
+            rows=decimal_rows,
+            row_count=11,
+        )
+    )
+
+    assert (
+        decimal_result["preview_type"]
+        == "top_n"
+    )
+
+    assert (
+        decimal_result["ranking_column"]
+        == "total_revenue"
+    )
+
+    expected_customers = [
+        "customer-d",
+        "customer-h",
+        "customer-b",
+        "customer-f",
+        "customer-i",
+        "customer-e",
+        "customer-j",
+        "customer-c",
+        "customer-a",
+        "customer-g",
+    ]
+
+    actual_customers = [
+        row["customer_id"]
+        for row in decimal_result["rows"]
+    ]
+
+    assert (
+        actual_customers
+        == expected_customers
+    )
+
+    print(
+        "[PASS] Decimal revenue values are ranked correctly "
+        "from highest to lowest."
+    )
+
+    # =============================================================
+    # TEST 6 — NO NUMERIC RANKING COLUMN FALLBACK
+    # =============================================================
+
+    print(
+        "\nTest 6 — Non-Numeric Result Fallback"
+    )
+
+    categorical_rows = [
+        {
+            "status": "completed",
+        },
+        {
+            "status": "cancelled",
+        },
+        {
+            "status": "refunded",
+        },
+        {
+            "status": "pending",
+        },
+        {
+            "status": "shipped",
+        },
+        {
+            "status": "completed",
+        },
+        {
+            "status": "cancelled",
+        },
+        {
+            "status": "refunded",
+        },
+        {
+            "status": "pending",
+        },
+        {
+            "status": "shipped",
+        },
+        {
+            "status": "completed",
+        },
+    ]
+
+    categorical_result = (
+        engine._prepare_result_for_llm(
+            columns=[
+                "status",
+            ],
+            rows=categorical_rows,
+            row_count=11,
+        )
+    )
+
+    assert (
+        categorical_result["preview_type"]
+        == "bounded_preview"
+    )
+
+    assert (
+        categorical_result["is_preview"]
+        is True
+    )
+
+    assert (
+        len(categorical_result["rows"])
+        == 10
+    )
+
+    assert (
+        categorical_result["rows"]
+        == categorical_rows[:10]
+    )
+
+    print(
+        "[PASS] Non-numeric results use an honest bounded "
+        "preview instead of inventing a ranking."
+    )
+
+    print(
+        "\n================================="
     )
     print(
-        "=============================="
+        "STATIC AI ANALYST TESTS PASSED"
+    )
+    print(
+        "================================="
+    )
+
+    return True
+
+
+def run_integration_tests():
+    """
+    Run the complete deterministic end-to-end AI Analyst suite.
+
+    Requires the local atlas-trino Docker container.
+
+    Tests:
+
+        Natural language
+            ↓
+        Mock LLM intent
+            ↓
+        Semantic validation
+            ↓
+        Query builder
+            ↓
+        Real Trino
+            ↓
+        Trusted analytical result
+            ↓
+        Bounded answer result
+            ↓
+        Mock answer LLM
+    """
+
+    engine, _ = build_test_engine()
+
+    print(
+        "FLOWMART END-TO-END AI ANALYST — INTEGRATION"
+    )
+    print(
+        "============================================="
     )
 
     # =============================================================
@@ -829,474 +1213,45 @@ def run_tests():
         "[PASS] Revenue-by-status analysis."
     )
 
-    # =============================================================
-    # TEST 4 — HALLUCINATION PROTECTION
-    # =============================================================
-
     print(
-        "\nTest 4 — Hallucination Protection"
-    )
-
-    hallucinating_intent_client = (
-        MockCombinedLLMClient(
-            intent_responses={
-                "What is our profit margin?":
-                    '{"metrics":["profit_margin"],'
-                    '"dimensions":[],"filters":{}}'
-            },
-            answer_responses={},
-        )
-    )
-
-    hallucination_engine = (
-        LLMAnalystEngine(
-            llm_client=
-                hallucinating_intent_client
-        )
-    )
-
-    try:
-        hallucination_engine.ask(
-            "What is our profit margin?"
-        )
-
-        print(
-            "[FAIL] Hallucinated intent was accepted."
-        )
-
-        return False
-
-    except ValueError as error:
-        print(
-            "[PASS] Hallucinated intent blocked:"
-        )
-        print(
-            error
-        )
-
-    # =============================================================
-    # TEST 5 — MOCK REQUEST ROUTING
-    # =============================================================
-
-    print(
-        "\nTest 5 — Mock Request Routing"
-    )
-
-    routing_client = (
-        MockCombinedLLMClient(
-            intent_responses={
-                "ROUTING INTENT TEST":
-                    '{"metrics":["total_revenue"],'
-                    '"dimensions":[],"filters":{}}'
-            },
-            answer_responses={
-                "ROUTING ANSWER TEST":
-                    "Revenue was $4,967,781.58."
-            },
-        )
-    )
-
-    intent_result = routing_client.generate(
-        system_prompt="Any intent prompt.",
-        user_prompt=(
-            "Interpret this question: "
-            "ROUTING INTENT TEST"
-        ),
-    )
-
-    assert (
-        intent_result
-        == '{"metrics":["total_revenue"],'
-        '"dimensions":[],"filters":{}}'
-    )
-
-    answer_result = routing_client.generate(
-        system_prompt="Any answer prompt.",
-        user_prompt=(
-            '{'
-            '"question": "ROUTING ANSWER TEST",'
-            '"intent": {},'
-            '"trusted_result": {'
-            '"columns": ["total_revenue"],'
-            '}'
-            '}'
-        ),
-    )
-
-    assert (
-        answer_result
-        == "Revenue was $4,967,781.58."
-    )
-
-    print(
-        "[PASS] Mock intent/answer routing is stable."
-    )
-
-    # =============================================================
-    # TEST 6 — LARGE RESULT PRESENTATION BOUNDARY
-    # =============================================================
-
-    print(
-        "\nTest 6 — Large Result Presentation Boundary"
-    )
-
-    large_rows = []
-
-    for index in range(25):
-        large_rows.append(
-            {
-                "customer_id":
-                    f"customer-{index}",
-                "total_revenue":
-                    str(index * 100),
-            }
-        )
-
-    compact_result = (
-        engine._prepare_result_for_llm(
-            columns=[
-                "customer_id",
-                "total_revenue",
-            ],
-            rows=large_rows,
-            row_count=25,
-        )
-    )
-
-    assert (
-        len(compact_result["rows"])
-        == 10
-    )
-
-    assert (
-        compact_result["row_count"]
-        == 25
-    )
-
-    assert (
-        compact_result["is_preview"]
-        is True
-    )
-
-    assert (
-        compact_result["preview_row_count"]
-        == 10
-    )
-
-    assert (
-        compact_result["omitted_row_count"]
-        == 15
-    )
-
-    assert (
-        compact_result["preview_type"]
-        == "top_n"
-    )
-
-    assert (
-        compact_result["ranking_column"]
-        == "total_revenue"
-    )
-
-    assert (
-        compact_result["ranking_order"]
-        == "descending"
-    )
-
-    # Verify the preview contains the ten highest values.
-    expected_revenues = [
-        str(index * 100)
-        for index in range(24, 14, -1)
-    ]
-
-    actual_revenues = [
-        row["total_revenue"]
-        for row in compact_result["rows"]
-    ]
-
-    assert (
-        actual_revenues
-        == expected_revenues
-    )
-
-    # Verify the original analytical result was not mutated.
-    assert (
-        len(large_rows)
-        == 25
-    )
-
-    assert (
-        large_rows[0]["total_revenue"]
-        == "0"
-    )
-
-    assert (
-        large_rows[-1]["total_revenue"]
-        == "2400"
-    )
-
-    print(
-        "[PASS] Large results are bounded for LLM narration "
-        "using deterministic top-N ranking without truncating "
-        "the complete analytical result."
-    )
-
-    # =============================================================
-    # TEST 7 — SMALL RESULT REMAINS COMPLETE
-    # =============================================================
-
-    print(
-        "\nTest 7 — Small Result Remains Complete"
-    )
-
-    small_rows = [
-        {
-            "status": "completed",
-            "total_revenue": "3243235.14",
-        },
-        {
-            "status": "cancelled",
-            "total_revenue": "419671.74",
-        },
-    ]
-
-    compact_result = (
-        engine._prepare_result_for_llm(
-            columns=[
-                "status",
-                "total_revenue",
-            ],
-            rows=small_rows,
-            row_count=2,
-        )
-    )
-
-    assert (
-        compact_result["rows"]
-        == small_rows
-    )
-
-    assert (
-        compact_result["row_count"]
-        == 2
-    )
-
-    assert (
-        compact_result["is_preview"]
-        is False
-    )
-
-    assert (
-        compact_result["preview_type"]
-        == "complete"
-    )
-
-    print(
-        "[PASS] Small results remain complete for the answer LLM."
-    )
-
-    # =============================================================
-    # TEST 8 — TOP-N RANKING WITH DECIMAL VALUES
-    # =============================================================
-
-    print(
-        "\nTest 8 — Top-N Ranking With Decimal Values"
-    )
-
-    decimal_rows = [
-        {
-            "customer_id": "customer-a",
-            "total_revenue": "2549.65",
-        },
-        {
-            "customer_id": "customer-b",
-            "total_revenue": "12089.51",
-        },
-        {
-            "customer_id": "customer-c",
-            "total_revenue": "3659.85",
-        },
-        {
-            "customer_id": "customer-d",
-            "total_revenue": "16784.14",
-        },
-        {
-            "customer_id": "customer-e",
-            "total_revenue": "8219.59",
-        },
-        {
-            "customer_id": "customer-f",
-            "total_revenue": "11019.44",
-        },
-        {
-            "customer_id": "customer-g",
-            "total_revenue": "754.81",
-        },
-        {
-            "customer_id": "customer-h",
-            "total_revenue": "16074.36",
-        },
-        {
-            "customer_id": "customer-i",
-            "total_revenue": "10269.47",
-        },
-        {
-            "customer_id": "customer-j",
-            "total_revenue": "5889.84",
-        },
-        {
-            "customer_id": "customer-k",
-            "total_revenue": "684.89",
-        },
-    ]
-
-    decimal_result = (
-        engine._prepare_result_for_llm(
-            columns=[
-                "customer_id",
-                "total_revenue",
-            ],
-            rows=decimal_rows,
-            row_count=11,
-        )
-    )
-
-    assert (
-        decimal_result["preview_type"]
-        == "top_n"
-    )
-
-    assert (
-        decimal_result["ranking_column"]
-        == "total_revenue"
-    )
-
-    expected_customers = [
-        "customer-d",
-        "customer-h",
-        "customer-b",
-        "customer-f",
-        "customer-i",
-        "customer-e",
-        "customer-j",
-        "customer-c",
-        "customer-a",
-        "customer-g",
-    ]
-
-    actual_customers = [
-        row["customer_id"]
-        for row in decimal_result["rows"]
-    ]
-
-    assert (
-        actual_customers
-        == expected_customers
-    )
-
-    print(
-        "[PASS] Decimal revenue values are ranked correctly "
-        "from highest to lowest."
-    )
-
-    # =============================================================
-    # TEST 9 — NO NUMERIC RANKING COLUMN FALLBACK
-    # =============================================================
-
-    print(
-        "\nTest 9 — Non-Numeric Result Fallback"
-    )
-
-    categorical_rows = [
-        {
-            "status": "completed",
-        },
-        {
-            "status": "cancelled",
-        },
-        {
-            "status": "refunded",
-        },
-        {
-            "status": "pending",
-        },
-        {
-            "status": "shipped",
-        },
-        {
-            "status": "completed",
-        },
-        {
-            "status": "cancelled",
-        },
-        {
-            "status": "refunded",
-        },
-        {
-            "status": "pending",
-        },
-        {
-            "status": "shipped",
-        },
-        {
-            "status": "completed",
-        },
-    ]
-
-    categorical_result = (
-        engine._prepare_result_for_llm(
-            columns=[
-                "status",
-            ],
-            rows=categorical_rows,
-            row_count=11,
-        )
-    )
-
-    assert (
-        categorical_result["preview_type"]
-        == "bounded_preview"
-    )
-
-    assert (
-        categorical_result["is_preview"]
-        is True
-    )
-
-    assert (
-        len(categorical_result["rows"])
-        == 10
-    )
-
-    assert (
-        categorical_result["rows"]
-        == categorical_rows[:10]
-    )
-
-    print(
-        "[PASS] Non-numeric results use an honest bounded "
-        "preview instead of inventing a ranking."
-    )
-
-    # =============================================================
-    # FINAL
-    # =============================================================
-
-    print(
-        "\n=============================="
+        "\n============================================="
     )
     print(
-        "END-TO-END AI ANALYST PASSED"
+        "END-TO-END AI ANALYST INTEGRATION PASSED"
     )
     print(
-        "=============================="
+        "============================================="
     )
 
     return True
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run Flowmart AI Analyst tests."
+        )
+    )
+
+    parser.add_argument(
+        "--integration",
+        action="store_true",
+        help=(
+            "Run the full end-to-end suite against "
+            "the local atlas-trino Docker container."
+        ),
+    )
+
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    success = run_tests()
+    args = parse_args()
+
+    if args.integration:
+        success = run_integration_tests()
+    else:
+        success = run_static_tests()
 
     raise SystemExit(
         0 if success else 1
