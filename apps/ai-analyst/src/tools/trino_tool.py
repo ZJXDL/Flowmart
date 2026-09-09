@@ -1,4 +1,5 @@
 from pathlib import Path
+import argparse
 import csv
 import io
 import re
@@ -219,9 +220,142 @@ class TrinoQueryTool:
         return result
 
 
+def run_static_validation_tests():
+    """
+    Run tests that do not require Docker or a live Trino instance.
+
+    These tests are suitable for GitHub Actions and other CI
+    environments where Flowmart infrastructure is not running.
+    """
+
+    print(
+        "FLOWMART TRINO TOOL — STATIC VALIDATION"
+    )
+    print(
+        "======================================="
+    )
+
+    tool = TrinoQueryTool()
+
+    passed = 0
+    total = 0
+
+    print()
+    print("Read-only query validation:")
+
+    valid_queries = [
+        """
+        SELECT
+            COUNT(*) AS order_count,
+            SUM(total_amount) AS total_revenue
+        FROM orders
+        """,
+        """
+        SELECT
+            CAST(created_at AS DATE) AS order_date,
+            SUM(total_amount) AS total_revenue
+        FROM orders
+        GROUP BY CAST(created_at AS DATE)
+        """,
+        """
+        SELECT
+            updated_at,
+            COUNT(*) AS order_count
+        FROM orders
+        GROUP BY updated_at
+        LIMIT 5
+        """,
+        """
+        WITH recent_orders AS (
+            SELECT order_id, total_amount
+            FROM orders
+        )
+        SELECT
+            COUNT(*) AS order_count
+        FROM recent_orders
+        """,
+    ]
+
+    for query in valid_queries:
+        total += 1
+
+        try:
+            tool._validate_query(query)
+
+            print(
+                "[PASS] Analytical query accepted."
+            )
+
+            passed += 1
+
+        except ValueError as error:
+            print(
+                "[FAIL] Legitimate query rejected:"
+            )
+
+            print(
+                f"       {error}"
+            )
+
+    print()
+    print("Destructive query protection:")
+
+    blocked_queries = [
+        "DROP TABLE orders",
+        "DELETE FROM orders",
+        "UPDATE orders SET status = 'cancelled'",
+        "CREATE TABLE evil AS SELECT * FROM orders",
+        "INSERT INTO orders SELECT * FROM orders",
+        "ALTER TABLE orders DROP COLUMN status",
+        "TRUNCATE TABLE orders",
+        "MERGE INTO orders USING orders ON orders.order_id = orders.order_id",
+        "CALL system.runtime.kill_query('123')",
+        "GRANT SELECT ON orders TO evil_user",
+        "REVOKE SELECT ON orders FROM evil_user",
+    ]
+
+    for query in blocked_queries:
+        total += 1
+
+        try:
+            tool._validate_query(query)
+
+            print(
+                f"[FAIL] Query was not blocked: {query}"
+            )
+
+        except ValueError:
+            print(
+                f"[PASS] Blocked: {query}"
+            )
+
+            passed += 1
+
+    print()
+    print(
+        f"Static validation tests: "
+        f"{passed}/{total} passed"
+    )
+
+    if passed == total:
+        print(
+            "TRINO TOOL STATIC VALIDATION PASSED"
+        )
+        return True
+
+    print(
+        "TRINO TOOL STATIC VALIDATION FAILED"
+    )
+
+    return False
+
+
 def run_data_test():
     """
     Verify that the tool returns structured analytical data.
+
+    This is an integration test and requires the local
+    atlas-trino Docker container.
     """
 
     tool = TrinoQueryTool()
@@ -278,6 +412,9 @@ def run_semantic_column_test():
     """
     Verify that generic Trino columns can be mapped to
     semantic column names.
+
+    This is an integration test and requires the local
+    atlas-trino Docker container.
     """
 
     tool = TrinoQueryTool()
@@ -340,74 +477,13 @@ def run_semantic_column_test():
     return True
 
 
-def run_security_tests():
-    """
-    Verify that destructive SQL statements are rejected
-    before reaching Trino.
-    """
-
-    tool = TrinoQueryTool()
-
-    blocked_queries = [
-        "DROP TABLE orders",
-        "DELETE FROM orders",
-        "UPDATE orders SET status = 'cancelled'",
-        "CREATE TABLE evil AS SELECT * FROM orders",
-        "INSERT INTO orders SELECT * FROM orders",
-        "ALTER TABLE orders DROP COLUMN status",
-        "TRUNCATE TABLE orders",
-        "MERGE INTO orders USING orders ON orders.order_id = orders.order_id",
-    ]
-
-    print()
-    print(
-        "FLOWMART TRINO TOOL — SECURITY TEST"
-    )
-    print(
-        "==================================="
-    )
-
-    passed = 0
-
-    for query in blocked_queries:
-        try:
-            tool.execute(query)
-
-            print(
-                f"[FAIL] Query was not blocked: {query}"
-            )
-
-        except ValueError:
-            print(
-                f"[PASS] Blocked: {query}"
-            )
-
-            passed += 1
-
-    print()
-
-    print(
-        f"Security tests: "
-        f"{passed}/{len(blocked_queries)} passed"
-    )
-
-    if passed == len(blocked_queries):
-        print(
-            "TRINO TOOL SECURITY TEST PASSED"
-        )
-        return True
-
-    print(
-        "TRINO TOOL SECURITY TEST FAILED"
-    )
-
-    return False
-
-
 def run_read_only_query_tests():
     """
-    Verify that legitimate analytical queries containing
-    words such as CREATED_AT are accepted.
+    Verify that legitimate analytical queries execute correctly
+    against the real Trino environment.
+
+    This is an integration test and requires the local
+    atlas-trino Docker container.
     """
 
     tool = TrinoQueryTool()
@@ -484,12 +560,23 @@ def run_read_only_query_tests():
     return False
 
 
-if __name__ == "__main__":
+def run_integration_tests():
+    """
+    Run the full Trino integration suite.
+
+    Requires the local atlas-trino Docker container.
+    """
+
+    print(
+        "FLOWMART TRINO TOOL — INTEGRATION MODE"
+    )
+    print(
+        "======================================"
+    )
+
     data_test = run_data_test()
 
     semantic_test = run_semantic_column_test()
-
-    security_test = run_security_tests()
 
     readonly_test = run_read_only_query_tests()
 
@@ -501,25 +588,56 @@ if __name__ == "__main__":
     if (
         data_test
         and semantic_test
-        and security_test
         and readonly_test
     ):
         print(
-            "FLOWMART TRINO QUERY TOOL PASSED"
+            "FLOWMART TRINO INTEGRATION PASSED"
         )
 
         print(
             "========================================"
         )
 
-        raise SystemExit(0)
+        return True
 
     print(
-        "FLOWMART TRINO QUERY TOOL FAILED"
+        "FLOWMART TRINO INTEGRATION FAILED"
     )
 
     print(
         "========================================"
     )
 
-    raise SystemExit(1)
+    return False
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Validate the Flowmart read-only Trino query tool."
+        )
+    )
+
+    parser.add_argument(
+        "--integration",
+        action="store_true",
+        help=(
+            "Run integration tests against the local "
+            "atlas-trino Docker container."
+        ),
+    )
+
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    if args.integration:
+        success = run_integration_tests()
+    else:
+        success = run_static_validation_tests()
+
+    raise SystemExit(
+        0 if success else 1
+    )
