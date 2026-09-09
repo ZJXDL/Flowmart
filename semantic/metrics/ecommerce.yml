@@ -1,0 +1,160 @@
+version: 1
+
+semantic_layer:
+  name: flowmart
+  description: >
+    Business metric definitions for the Flowmart e-commerce analytics platform.
+    Metrics are defined on the trusted dbt orders model and are intended to
+    provide a consistent analytical vocabulary for BI tools and the AI Analyst.
+
+metrics:
+
+  - name: total_revenue
+    label: Total Revenue
+    description: >
+      Total monetary value of all valid orders.
+    model: orders
+    expression: SUM(total_amount)
+    type: sum
+    unit: currency
+    time_dimension: created_at
+
+  - name: order_count
+    label: Order Count
+    description: >
+      Number of valid orders.
+    model: orders
+    expression: COUNT(order_id)
+    type: count
+    unit: orders
+    time_dimension: created_at
+
+  - name: average_order_value
+    label: Average Order Value
+    description: >
+      Average monetary value of an order.
+    model: orders
+    expression: AVG(total_amount)
+    type: average
+    unit: currency
+    time_dimension: created_at
+
+  - name: customer_count
+    label: Customer Count
+    description: >
+      Number of distinct customers who placed valid orders.
+    model: orders
+    expression: COUNT(DISTINCT customer_id)
+    type: count_distinct
+    unit: customers
+    time_dimension: created_at
+
+  - name: revenue_per_customer
+    label: Revenue per Customer
+    description: >
+      Total revenue divided by the number of distinct customers.
+    model: orders
+    expression: >
+      SUM(total_amount) / NULLIF(COUNT(DISTINCT customer_id), 0)
+    type: ratio
+    unit: currency_per_customer
+    time_dimension: created_at
+
+  - name: cancelled_order_count
+    label: Cancelled Order Count
+    description: >
+      Number of orders whose current status is cancelled.
+    model: orders
+    expression: >
+      COUNT(CASE WHEN status = 'cancelled' THEN order_id END)
+    type: count
+    unit: orders
+    time_dimension: created_at
+
+  - name: refunded_order_count
+    label: Refunded Order Count
+    description: >
+      Number of orders whose current status is refunded.
+    model: orders
+    expression: >
+      COUNT(CASE WHEN status = 'refunded' THEN order_id END)
+    type: count
+    unit: orders
+    time_dimension: created_at
+
+  - name: cancelled_order_rate
+    label: Cancelled Order Rate
+    description: >
+      Percentage of valid orders whose current status is cancelled.
+    model: orders
+    expression: >
+      CAST(
+        COUNT(CASE WHEN status = 'cancelled' THEN order_id END)
+        AS DOUBLE
+      ) / NULLIF(COUNT(order_id), 0)
+    type: ratio
+    unit: percentage
+    time_dimension: created_at
+
+  - name: refunded_order_rate
+    label: Refunded Order Rate
+    description: >
+      Percentage of valid orders whose current status is refunded.
+    model: orders
+    expression: >
+      CAST(
+        COUNT(CASE WHEN status = 'refunded' THEN order_id END)
+        AS DOUBLE
+      ) / NULLIF(COUNT(order_id), 0)
+    type: ratio
+    unit: percentage
+    time_dimension: created_at
+
+dimensions:
+
+  - name: order_id
+    label: Order ID
+    model: orders
+    column: order_id
+    type: identifier
+
+  - name: customer_id
+    label: Customer ID
+    model: orders
+    column: customer_id
+    type: identifier
+
+  - name: status
+    label: Order Status
+    model: orders
+    column: status
+    type: categorical
+
+  - name: created_at
+    label: Created Timestamp
+    model: orders
+    column: created_at
+    type: timestamp
+
+  - name: updated_at
+    label: Updated Timestamp
+    model: orders
+    column: updated_at
+    type: timestamp
+
+  - name: order_date
+    label: Order Date
+    model: orders
+    expression: CAST(created_at AS DATE)
+    type: date
+
+relationships:
+
+  - from: orders.customer_id
+    to: customers.customer_id
+
+  - from: orders.product_id
+    to: products.product_id
+
+  - from: orders.order_id
+    to: order_items.order_id

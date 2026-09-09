@@ -1,0 +1,65 @@
+version: 1
+
+semantic_layer:
+  name: flowmart
+  model: orders
+  description: >
+    Analytical dimensions exposed by the Flowmart order model.
+    Dimensions provide the attributes used to group, filter, and segment
+    business metrics.
+
+dimensions:
+
+  - name: order_id
+    label: Order ID
+    description: >
+      Unique identifier for an order.
+    column: order_id
+    type: string
+    role: key
+
+  - name: customer_id
+    label: Customer ID
+    description: >
+      Identifier of the customer who placed the order.
+    column: customer_id
+    type: string
+    role: foreign_key
+
+  - name: status
+    label: Order Status
+    description: >
+      Current business status of the order.
+    column: status
+    type: string
+    role: attribute
+    allowed_values:
+      - pending
+      - shipped
+      - completed
+      - cancelled
+      - refunded
+
+  - name: created_at
+    label: Order Created At
+    description: >
+      Timestamp when the order was created.
+    column: created_at
+    type: timestamp
+    role: time
+
+  - name: order_date
+    label: Order Date
+    description: >
+      Calendar date derived from the order creation timestamp.
+    expression: CAST(created_at AS DATE)
+    type: date
+    role: time
+
+  - name: updated_at
+    label: Order Updated At
+    description: >
+      Timestamp of the latest update represented by the analytical order row.
+    column: updated_at
+    type: timestamp
+    role: time

@@ -1,0 +1,101 @@
+version: 1
+
+semantic_layer:
+  name: flowmart
+  description: >
+    Relationship definitions for the Flowmart semantic layer.
+    These relationships describe how analytical models and dimensions
+    should be interpreted by downstream BI and AI consumers.
+
+models:
+
+  - name: orders
+    description: >
+      Trusted analytical order model produced by dbt from the deduplicated
+      current order state.
+
+    grain: one row per order
+
+    primary_key:
+      - order_id
+
+    dimensions:
+      - order_id
+      - customer_id
+      - status
+      - created_at
+      - order_date
+      - updated_at
+
+    metrics:
+      - total_revenue
+      - order_count
+      - average_order_value
+      - customer_count
+      - revenue_per_customer
+      - cancelled_order_count
+      - refunded_order_count
+      - cancelled_order_rate
+      - refunded_order_rate
+
+relationships:
+
+  - name: orders_to_customer
+    from:
+      model: orders
+      column: customer_id
+    to:
+      entity: customer
+      column: customer_id
+    cardinality: many_to_one
+    status: planned
+    description: >
+      Each order belongs to one customer. A customer may place many orders.
+      A dedicated customer dimension is planned for a future dbt model.
+
+  - name: orders_to_date
+    from:
+      model: orders
+      column: created_at
+    to:
+      entity: date
+      column: date
+    cardinality: many_to_one
+    status: logical
+    description: >
+      Each order is associated with a calendar date derived from created_at.
+      The date dimension can be materialized when the dedicated date model
+      is introduced.
+
+  - name: orders_to_status
+    from:
+      model: orders
+      column: status
+    to:
+      entity: order_status
+      column: status
+    cardinality: many_to_one
+    status: logical
+    description: >
+      Each order has one current status. The allowed status vocabulary is
+      pending, shipped, completed, cancelled, and refunded.
+
+future_entities:
+
+  - name: customer
+    natural_key: customer_id
+    status: planned
+    description: >
+      Customer dimension containing customer-level descriptive attributes.
+
+  - name: date
+    natural_key: date
+    status: planned
+    description: >
+      Calendar dimension for date-based analysis.
+
+  - name: order_status
+    natural_key: status
+    status: logical
+    description: >
+      Controlled vocabulary of valid order statuses.

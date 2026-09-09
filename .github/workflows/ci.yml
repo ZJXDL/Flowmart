@@ -1,0 +1,92 @@
+name: Flowmart CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  test:
+    name: Flowmart Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r apps/ai-analyst/requirements.txt
+          pip install psycopg[binary]
+
+      - name: Validate semantic layer
+        run: |
+          python semantic/validator.py
+
+      - name: Test semantic query builder
+        run: |
+          python apps/ai-analyst/src/semantic_query_builder.py
+
+      - name: Test analyst intent
+        run: |
+          python apps/ai-analyst/src/analyst_intent.py
+
+      - name: Test LLM intent interpreter
+        run: |
+          python apps/ai-analyst/src/llm_intent_interpreter.py
+
+      - name: Test Trino query security
+        run: |
+          python apps/ai-analyst/src/tools/trino_tool.py
+
+      - name: Test answer generator
+        run: |
+          python apps/ai-analyst/src/analyst_answer_generator.py
+
+      - name: Test LLM analyst engine
+        run: |
+          python apps/ai-analyst/src/llm_analyst_engine.py
+
+      - name: Test statistical anomaly detector
+        run: |
+          python quality/anomaly/detectors/statistical_detector.py
+
+      - name: Test anomaly detection service
+        run: |
+          python quality/anomaly/anomaly_service.py
+
+      - name: Test anomaly alert builder
+        run: |
+          python quality/anomaly/alerts/anomaly_alert.py
+
+      - name: Test anomaly runner
+        run: |
+          python quality/anomaly/anomaly_runner.py
+
+      - name: Test pipeline metrics
+        run: |
+          python observability/metrics/pipeline_metrics.py
+
+      - name: Test observability alerts
+        run: |
+          python observability/alerts/observability_alerts.py
+
+      - name: Test health dashboard
+        run: |
+          python observability/dashboards/health_dashboard.py
+
+      - name: CI completed
+        run: |
+          echo "Flowmart CI completed successfully."

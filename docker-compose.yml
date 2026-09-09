@@ -1,3 +1,5 @@
+name: atlas-lakehouse
+
 services:
   postgres:
     image: postgres:17
@@ -55,6 +57,23 @@ services:
       CATALOG_S3_ACCESS__KEY__ID: ${MINIO_ROOT_USER}
       CATALOG_S3_SECRET__ACCESS__KEY: ${MINIO_ROOT_PASSWORD}
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
+    networks:
+      - atlas-network
+
+  trino:
+    image: trinodb/trino:latest
+    container_name: atlas-trino
+    restart: unless-stopped
+    depends_on:
+      - iceberg-rest
+      - minio
+    ports:
+      - "8082:8080"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - ./infrastructure/trino/catalog:/etc/trino/catalog:ro
     networks:
       - atlas-network
 
@@ -139,9 +158,10 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - |
-        FLINK_PROPERTIES=
+      AWS_REGION: us-east-1
+      FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
+        jobmanager.memory.process.size: 1600m
     volumes:
       - ./infrastructure/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:ro
       - ./infrastructure/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:ro
@@ -150,6 +170,7 @@ services:
       - ./infrastructure/flink/lib/iceberg-aws-bundle-1.11.0.jar:/opt/flink/lib/iceberg-aws-bundle-1.11.0.jar:ro
       - ./infrastructure/flink/lib/hadoop-client-api-3.4.3.jar:/opt/flink/lib/hadoop-client-api-3.4.3.jar:ro
       - ./infrastructure/flink/lib/hadoop-client-runtime-3.4.3.jar:/opt/flink/lib/hadoop-client-runtime-3.4.3.jar:ro
+      - ./infrastructure/flink/lib/flink-metrics-dropwizard-2.1.0.jar:/opt/flink/lib/flink-metrics-dropwizard-2.1.0.jar:ro
       - ./pipelines/bronze/atlas-bronze-udf.jar:/opt/flink/lib/atlas-bronze-udf.jar:ro
     networks:
       - atlas-network
@@ -162,10 +183,11 @@ services:
       - flink-jobmanager
     command: taskmanager
     environment:
-      - |
-        FLINK_PROPERTIES=
+      AWS_REGION: us-east-1
+      FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 1
+        taskmanager.memory.process.size: 2048m
     volumes:
       - ./infrastructure/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:ro
       - ./infrastructure/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:ro
@@ -174,6 +196,7 @@ services:
       - ./infrastructure/flink/lib/iceberg-aws-bundle-1.11.0.jar:/opt/flink/lib/iceberg-aws-bundle-1.11.0.jar:ro
       - ./infrastructure/flink/lib/hadoop-client-api-3.4.3.jar:/opt/flink/lib/hadoop-client-api-3.4.3.jar:ro
       - ./infrastructure/flink/lib/hadoop-client-runtime-3.4.3.jar:/opt/flink/lib/hadoop-client-runtime-3.4.3.jar:ro
+      - ./infrastructure/flink/lib/flink-metrics-dropwizard-2.1.0.jar:/opt/flink/lib/flink-metrics-dropwizard-2.1.0.jar:ro
       - ./pipelines/bronze/atlas-bronze-udf.jar:/opt/flink/lib/atlas-bronze-udf.jar:ro
     networks:
       - atlas-network

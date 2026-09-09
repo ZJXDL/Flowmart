@@ -2,9 +2,14 @@
 __pycache__/
 *.pyc
 .venv/
+.dbt-venv/
 .idea/
 .vscode/
 .DS_Store
+
+# dbt local artifacts
+target/
+logs/
 
 # Flink build artifacts
 pipelines/bronze/build/

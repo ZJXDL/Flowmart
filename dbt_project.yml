@@ -1,0 +1,13 @@
+name: flowmart
+version: '1.0.0'
+config-version: 2
+
+profile: flowmart
+
+model-paths: ["dbt/models"]
+test-paths: ["dbt/tests"]
+macro-paths: ["dbt/macros"]
+
+models:
+  flowmart:
+    +materialized: table
