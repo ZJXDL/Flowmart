@@ -1,5 +1,7 @@
 from pathlib import Path
+import argparse
 import subprocess
+
 import yaml
 
 
@@ -9,11 +11,16 @@ PROJECT_ROOT = ROOT.parent
 
 class SemanticValidator:
     """
-    Validates the Flowmart semantic contracts against the actual
-    analytical schema exposed by Trino.
+    Validates the Flowmart semantic contracts.
+
+    Default mode performs static contract validation and does not require
+    Docker or Trino. Integration mode additionally validates the semantic
+    contract against the live Trino orders schema.
     """
 
-    def __init__(self):
+    def __init__(self, integration=False):
+        self.integration = integration
+
         self.errors = []
         self.warnings = []
 
@@ -35,7 +42,9 @@ class SemanticValidator:
 
         metrics_document = self._load_yaml(metrics_path)
         dimensions_document = self._load_yaml(dimensions_path)
-        relationships_document = self._load_yaml(relationships_path)
+        relationships_document = self._load_yaml(
+            relationships_path
+        )
 
         self.metrics = {
             metric["name"]: metric
@@ -48,7 +57,8 @@ class SemanticValidator:
         }
 
         self.relationships = relationships_document.get(
-            "relationships", []
+            "relationships",
+            [],
         )
 
         models = relationships_document.get("models", [])
@@ -58,7 +68,9 @@ class SemanticValidator:
 
     def _get_trino_columns(self):
         """
-        Retrieve the actual orders schema from Trino.
+        Retrieve the actual orders schema from the local Trino container.
+
+        This method is only called in integration mode.
         """
 
         command = [
@@ -92,7 +104,9 @@ class SemanticValidator:
             )
 
             if result.stderr.strip():
-                self.errors.append(result.stderr.strip())
+                self.errors.append(
+                    result.stderr.strip()
+                )
 
             return set()
 
@@ -127,7 +141,7 @@ class SemanticValidator:
 
         if len(self.relationships) != 3:
             self.errors.append(
-                f"Expected 3 relationships, found "
+                "Expected 3 relationships, found "
                 f"{len(self.relationships)}."
             )
 
@@ -162,7 +176,7 @@ class SemanticValidator:
             if metric.get("model") != "orders":
                 self.errors.append(
                     f"Metric '{name}' does not target "
-                    f"the orders model."
+                    "the orders model."
                 )
 
             if not metric.get("expression"):
@@ -180,12 +194,16 @@ class SemanticValidator:
                     f"Metric '{name}' has no description."
                 )
 
-    def validate_dimensions(self, trino_columns):
+    def validate_dimensions(self, trino_columns=None):
         for name, dimension in self.dimensions.items():
             column = dimension.get("column")
 
             if column:
-                if column not in trino_columns:
+                if (
+                    self.integration
+                    and trino_columns is not None
+                    and column not in trino_columns
+                ):
                     self.errors.append(
                         f"Dimension '{name}' references missing "
                         f"Trino column '{column}'."
@@ -194,12 +212,15 @@ class SemanticValidator:
             elif not dimension.get("expression"):
                 self.errors.append(
                     f"Dimension '{name}' has neither a column "
-                    f"nor an expression."
+                    "nor an expression."
                 )
 
-    def validate_relationships(self, trino_columns):
+    def validate_relationships(self, trino_columns=None):
         for relationship in self.relationships:
-            name = relationship.get("name", "<unnamed>")
+            name = relationship.get(
+                "name",
+                "<unnamed>",
+            )
 
             source = relationship.get("from", {})
             source_model = source.get("model")
@@ -208,10 +229,14 @@ class SemanticValidator:
             if source_model != "orders":
                 self.errors.append(
                     f"Relationship '{name}' does not originate "
-                    f"from the orders model."
+                    "from the orders model."
                 )
 
-            if source_column not in trino_columns:
+            if (
+                self.integration
+                and trino_columns is not None
+                and source_column not in trino_columns
+            ):
                 self.errors.append(
                     f"Relationship '{name}' references missing "
                     f"source column '{source_column}'."
@@ -285,12 +310,16 @@ class SemanticValidator:
         self.validate_model()
         self.validate_metrics()
 
-        trino_columns = self._get_trino_columns()
+        trino_columns = None
 
-        if trino_columns:
-            self.validate_dimensions(trino_columns)
-            self.validate_relationships(trino_columns)
+        if self.integration:
+            trino_columns = self._get_trino_columns()
 
+            if not trino_columns:
+                return False
+
+        self.validate_dimensions(trino_columns)
+        self.validate_relationships(trino_columns)
         self.validate_model_lists()
 
         return not self.errors
@@ -301,6 +330,11 @@ class SemanticValidator:
         print(f"Metrics:       {len(self.metrics)}")
         print(f"Dimensions:    {len(self.dimensions)}")
         print(f"Relationships: {len(self.relationships)}")
+
+        if self.integration:
+            print("Mode:          integration")
+        else:
+            print("Mode:          static")
 
         if self.errors:
             print("\nERRORS:")
@@ -322,8 +356,29 @@ class SemanticValidator:
             print("SEMANTIC VALIDATION FAILED")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Validate the Flowmart semantic layer."
+    )
+
+    parser.add_argument(
+        "--integration",
+        action="store_true",
+        help=(
+            "Also validate the semantic contract against "
+            "the local atlas-trino container."
+        ),
+    )
+
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    validator = SemanticValidator()
+    args = parse_args()
+
+    validator = SemanticValidator(
+        integration=args.integration
+    )
 
     success = validator.validate()
 
