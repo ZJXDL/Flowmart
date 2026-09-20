@@ -700,7 +700,7 @@ The workflow is located at:
 .github/workflows/ci.yml
 ```
 
-> The workflow is configured locally but has not yet been confirmed through a successful GitHub-hosted Actions run.
+> The workflow is configured locally and has been confirmed through a successful GitHub-hosted Actions run.
 
 ---
 
