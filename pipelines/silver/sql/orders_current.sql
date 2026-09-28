@@ -6,9 +6,9 @@ SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
 CREATE CATALOG atlas_iceberg WITH (
     'type' = 'iceberg',
     'catalog-type' = 'rest',
-    'uri' = 'http://172.23.0.4:8181',
+    'uri' = 'http://iceberg-rest:8181',
     'warehouse' = 's3://warehouse',
-    's3.endpoint' = 'http://172.23.0.2:9000',
+    's3.endpoint' = 'http://minio:9000',
     's3.path-style-access' = 'true',
     's3.access-key-id' = 'atlas',
     's3.secret-access-key' = 'atlas_minio_password'
@@ -53,7 +53,7 @@ FROM (
         event_ts,
         ROW_NUMBER() OVER (
             PARTITION BY order_id
-            ORDER BY event_ts DESC
+            ORDER BY event_ts DESC, CASE WHEN operation = 'd' THEN 1 ELSE 0 END DESC
         ) AS rn
     FROM silver_orders
     WHERE order_id IS NOT NULL

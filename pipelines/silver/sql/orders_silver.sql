@@ -6,9 +6,9 @@ SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
 CREATE CATALOG atlas_iceberg WITH (
     'type' = 'iceberg',
     'catalog-type' = 'rest',
-    'uri' = 'http://172.23.0.7:8181',
+    'uri' = 'http://iceberg-rest:8181',
     'warehouse' = 's3://warehouse',
-    's3.endpoint' = 'http://172.23.0.5:9000',
+    's3.endpoint' = 'http://minio:9000',
     's3.path-style-access' = 'true',
     's3.access-key-id' = 'atlas',
     's3.secret-access-key' = 'atlas_minio_password'

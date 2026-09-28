@@ -125,3 +125,18 @@ CREATE INDEX idx_payments_order
 
 CREATE INDEX idx_inventory_product
     ON inventory(product_id);
+
+
+-- Configure CDC access for the local Debezium connector.
+-- The connector user and password must match postgres-connector.json.
+CREATE ROLE debezium WITH LOGIN REPLICATION PASSWORD 'debezium_dev_password';
+GRANT CONNECT ON DATABASE atlas TO debezium;
+GRANT USAGE ON SCHEMA public TO debezium;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO debezium;
+ALTER DEFAULT PRIVILEGES FOR ROLE atlas IN SCHEMA public
+    GRANT SELECT ON TABLES TO debezium;
+
+-- Keep full before images so delete events can be represented in Bronze.
+ALTER TABLE orders REPLICA IDENTITY FULL;
+
+CREATE PUBLICATION atlas_publication FOR ALL TABLES;

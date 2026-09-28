@@ -31,6 +31,10 @@ jobs:
           pip install -r apps/ai-analyst/requirements.txt
           pip install psycopg[binary]
 
+      - name: Build Flink runtime image
+        run: |
+          docker build -f infrastructure/flink/Dockerfile -t flowmart-flink:ci .
+
       - name: Validate semantic layer
         run: |
           python semantic/validator.py

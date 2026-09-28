@@ -16,9 +16,9 @@ SET 'execution.checkpointing.mode' = 'EXACTLY_ONCE';
 CREATE CATALOG atlas_iceberg WITH (
     'type' = 'iceberg',
     'catalog-type' = 'rest',
-    'uri' = 'http://atlas-iceberg-rest:8181',
+    'uri' = 'http://iceberg-rest:8181',
     'warehouse' = 's3://warehouse',
-    's3.endpoint' = 'http://atlas-minio:9000',
+    's3.endpoint' = 'http://minio:9000',
     's3.path-style-access' = 'true',
     's3.access-key-id' = 'atlas',
     's3.secret-access-key' = 'atlas_minio_password'
@@ -118,26 +118,26 @@ CREATE TABLE orders_cdc (
 
 
 -- ============================================================
--- 5. Stream CDC events into Iceberg Bronze
+-- 5. Stream CDC events, including deletes, into Iceberg Bronze
 -- ============================================================
 
 INSERT INTO atlas_iceberg.atlas.bronze_orders
 
 SELECT
-    payload.`after`.order_id,
-    payload.`after`.customer_id,
-    payload.`after`.status,
+    COALESCE(payload.`after`.order_id, payload.`before`.order_id),
+    COALESCE(payload.`after`.customer_id, payload.`before`.customer_id),
+    COALESCE(payload.`after`.status, payload.`before`.status),
 
     CAST(
         decode_debezium_decimal(
-            payload.`after`.total_amount,
+            COALESCE(payload.`after`.total_amount, payload.`before`.total_amount),
             2
         ) AS DECIMAL(38,2)
     ),
 
     CAST(
         REPLACE(
-            REPLACE(payload.`after`.created_at, 'T', ' '),
+            REPLACE(COALESCE(payload.`after`.created_at, payload.`before`.created_at), 'T', ' '),
             'Z',
             ''
         ) AS TIMESTAMP_LTZ(6)
@@ -145,15 +145,15 @@ SELECT
 
     CAST(
         REPLACE(
-            REPLACE(payload.`after`.updated_at, 'T', ' '),
+            REPLACE(COALESCE(payload.`after`.updated_at, payload.`before`.updated_at), 'T', ' '),
             'Z',
             ''
         ) AS TIMESTAMP_LTZ(6)
     ),
 
     payload.`op`,
-    payload.ts_ms
+    COALESCE(payload.ts_us, payload.ts_ms * 1000)
 
 FROM default_catalog.default_database.orders_cdc
 
-WHERE payload.`after`.order_id IS NOT NULL;
+WHERE COALESCE(payload.`after`.order_id, payload.`before`.order_id) IS NOT NULL;
