@@ -21,7 +21,7 @@ FROM (
         event_ts,
         ROW_NUMBER() OVER (
             PARTITION BY order_id
-            ORDER BY event_ts DESC
+            ORDER BY event_ts DESC, CASE WHEN operation = 'd' THEN 1 ELSE 0 END DESC
         ) AS rn
     FROM iceberg.atlas.silver_orders
     WHERE order_id IS NOT NULL

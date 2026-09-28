@@ -152,84 +152,30 @@ The platform covers:
 
 ```text
 flowmart/
-│
+├── .github/workflows/ci.yml
 ├── apps/
-│   ├── ecommerce-generator/
-│   │   ├── generator.py
-│   │   └── simulator.py
-│   │
-│   └── ai-analyst/
-│       ├── requirements.txt
-│       └── src/
-│           ├── analyst_answer_generator.py
-│           ├── analyst_engine.py
-│           ├── analyst_intent.py
-│           ├── analytical_query_service.py
-│           ├── groq_llm_client.py
-│           ├── intent_interpreter.py
-│           ├── llm_analyst_engine.py
-│           ├── llm_client.py
-│           ├── llm_intent_interpreter.py
-│           ├── openai_llm_client.py
-│           ├── openrouter_llm_client.py
-│           ├── run_real_analyst.py
-│           ├── semantic_bridge.py
-│           ├── semantic_query_builder.py
-│           └── tools/
-│               └── trino_tool.py
-│
+│   ├── ai-analyst/
+│   └── ecommerce-generator/
+├── dbt/
+│   ├── models/
+│   └── tests/
 ├── infrastructure/
-│   ├── postgres/
-│   ├── kafka/
+│   ├── cdc/postgres-connector.json
 │   ├── flink/
-│   ├── minio/
-│   ├── iceberg/
-│   └── trino/
-│
-├── ingestion/
-│   ├── cdc/
-│   └── events/
-│
+│   │   ├── Dockerfile
+│   │   └── pom.xml
+│   ├── postgres/init.sql
+│   └── trino/catalog/iceberg.properties
+├── observability/
 ├── pipelines/
 │   ├── bronze/
 │   ├── silver/
 │   └── gold/
-│
+├── quality/anomaly/
 ├── semantic/
-│   ├── metrics/
-│   ├── dimensions/
-│   ├── relationships/
-│   ├── registry.py
-│   └── validator.py
-│
-├── quality/
-│   └── anomaly/
-│       ├── detectors/
-│       ├── alerts/
-│       ├── anomaly_service.py
-│       └── anomaly_runner.py
-│
-├── observability/
-│   ├── metrics/
-│   ├── dashboards/
-│   └── alerts/
-│
-├── dbt/
-│   ├── models/
-│   └── tests/
-│
-├── dashboards/
-├── tests/
-├── docs/
-│
-├── .github/
-│   └── workflows/
-│       └── ci.yml
-│
 ├── docker-compose.yml
 ├── dbt_project.yml
 ├── .env.example
-├── .gitignore
 └── README.md
 ```
 
@@ -657,50 +603,11 @@ Combined anomaly detection and observability validation:
 
 # 13. CI/CD
 
-GitHub Actions is configured to automatically validate the project.
+GitHub Actions runs the repository's Python validation scripts and builds the custom Flink image. The image build compiles the decimal-decoder UDF and resolves the pinned connector dependencies.
 
-The CI workflow covers:
+The workflow does not currently launch PostgreSQL, Kafka, Debezium, Flink, Iceberg, and Trino as an integrated test environment. The service-level results below are manual validation results, not coverage provided by each CI run.
 
-* Dependency installation
-* Semantic layer validation
-* Semantic query builder
-* Analyst intent
-* LLM intent interpreter
-* Trino query security
-* Answer generation
-* LLM analyst engine
-* Anomaly detection
-* Anomaly alerts
-* Anomaly runner
-* Pipeline metrics
-* Observability alerts
-* Health dashboard
-
-Workflow:
-
-```text
-Push / Pull Request
-        ↓
-GitHub Actions
-        ↓
-Install Dependencies
-        ↓
-Run Validation
-        ↓
-Run Application Tests
-        ↓
-Run Anomaly Tests
-        ↓
-Run Observability Tests
-```
-
-The workflow is located at:
-
-```text
-.github/workflows/ci.yml
-```
-
-> The workflow is configured locally and has been confirmed through a successful GitHub-hosted Actions run.
+Workflow: `.github/workflows/ci.yml`
 
 ---
 
@@ -720,19 +627,48 @@ Never commit secrets to the repository.
 
 ---
 
-## Start Infrastructure
+## Start the local stack
 
-From the project root:
+Copy the development environment file, then build and start the services. The credentials in the template are for this local demo only.
 
-```cmd
-docker compose up -d
-```
+PowerShell:
 
-Check containers:
-
-```cmd
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --build
 docker compose ps
 ```
+
+The Flink image build downloads the connector dependencies and compiles the decimal-decoder UDF, so the setup does not depend on JAR files already present on your machine.
+
+## Generate source data
+
+In a second PowerShell window:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r apps/ecommerce-generator/requirements.txt
+python apps/ecommerce-generator/generator.py
+```
+
+## Start CDC and the Flink pipelines
+
+Register Debezium after the source tables have been seeded:
+
+```powershell
+curl.exe -X POST -H "Content-Type: application/json" --data-binary "@infrastructure/cdc/postgres-connector.json" http://localhost:8083/connectors
+```
+
+Submit the Bronze and Silver jobs to the Flink cluster:
+
+```powershell
+docker compose exec -d flink-jobmanager /opt/flink/bin/sql-client.sh -f /opt/flowmart/pipelines/bronze/sql/orders_bronze.sql
+docker compose exec -d flink-jobmanager /opt/flink/bin/sql-client.sh -f /opt/flowmart/pipelines/silver/sql/orders_silver.sql
+docker compose exec -d flink-jobmanager /opt/flink/bin/sql-client.sh -f /opt/flowmart/pipelines/silver/sql/orders_current.sql
+```
+
+These are development-only credentials and services. Do not reuse them outside this local stack.
 
 ---
 
@@ -841,6 +777,8 @@ GitHub Actions provides automated validation for future changes.
 ---
 
 # Validation Summary
+
+The checkmarks below record prior manual validation. CI does not yet reproduce the full CDC-to-lakehouse flow; see [CI/CD](#13-cicd) for its current coverage.
 
 | Component                |  Result |
 | ------------------------ | ------: |

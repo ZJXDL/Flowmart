@@ -8,9 +8,9 @@ services:
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-atlas}
+      POSTGRES_USER: ${POSTGRES_USER:-atlas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-atlas_dev_password}
     command:
       - postgres
       - -c
@@ -33,8 +33,8 @@ services:
       - "9010:9000"
       - "9011:9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-atlas}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-atlas_minio_password}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -54,8 +54,8 @@ services:
       CATALOG_WAREHOUSE: s3://warehouse/
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://minio:9000
-      CATALOG_S3_ACCESS__KEY__ID: ${MINIO_ROOT_USER}
-      CATALOG_S3_SECRET__ACCESS__KEY: ${MINIO_ROOT_PASSWORD}
+      CATALOG_S3_ACCESS__KEY__ID: ${MINIO_ROOT_USER:-atlas}
+      CATALOG_S3_SECRET__ACCESS__KEY: ${MINIO_ROOT_PASSWORD:-atlas_minio_password}
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
     networks:
       - atlas-network
@@ -70,8 +70,8 @@ services:
     ports:
       - "8082:8080"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-atlas}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-atlas_minio_password}
     volumes:
       - ./infrastructure/trino/catalog:/etc/trino/catalog:ro
     networks:
@@ -121,9 +121,9 @@ services:
       KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
 
-      REST_HOST_NAME: 172.23.0.2
+      REST_HOST_NAME: "0.0.0.0"
       REST_PORT: 8083
-      REST_ADVERTISED_HOST_NAME: 172.23.0.2
+      REST_ADVERTISED_HOST_NAME: kafka-connect
       REST_ADVERTISED_PORT: 8083
 
       OFFSET_FLUSH_INTERVAL_MS: 60000
@@ -151,7 +151,10 @@ services:
       - atlas-network
 
   flink-jobmanager:
-    image: flink:2.1.0-scala_2.12-java17
+    image: flowmart-flink:2.1.0
+    build:
+      context: .
+      dockerfile: infrastructure/flink/Dockerfile
     container_name: atlas-flink-jobmanager
     restart: unless-stopped
     command: jobmanager
@@ -163,20 +166,15 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         jobmanager.memory.process.size: 1600m
     volumes:
-      - ./infrastructure/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:ro
-      - ./infrastructure/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:ro
-      - ./infrastructure/flink/lib/kafka-clients-4.2.0.jar:/opt/flink/lib/kafka-clients-4.2.0.jar:ro
-      - ./infrastructure/flink/lib/iceberg-flink-runtime-2.1-1.11.0.jar:/opt/flink/lib/iceberg-flink-runtime-2.1-1.11.0.jar:ro
-      - ./infrastructure/flink/lib/iceberg-aws-bundle-1.11.0.jar:/opt/flink/lib/iceberg-aws-bundle-1.11.0.jar:ro
-      - ./infrastructure/flink/lib/hadoop-client-api-3.4.3.jar:/opt/flink/lib/hadoop-client-api-3.4.3.jar:ro
-      - ./infrastructure/flink/lib/hadoop-client-runtime-3.4.3.jar:/opt/flink/lib/hadoop-client-runtime-3.4.3.jar:ro
-      - ./infrastructure/flink/lib/flink-metrics-dropwizard-2.1.0.jar:/opt/flink/lib/flink-metrics-dropwizard-2.1.0.jar:ro
-      - ./pipelines/bronze/atlas-bronze-udf.jar:/opt/flink/lib/atlas-bronze-udf.jar:ro
+      - ./pipelines:/opt/flowmart/pipelines:ro
     networks:
       - atlas-network
 
   flink-taskmanager:
-    image: flink:2.1.0-scala_2.12-java17
+    image: flowmart-flink:2.1.0
+    build:
+      context: .
+      dockerfile: infrastructure/flink/Dockerfile
     container_name: atlas-flink-taskmanager
     restart: unless-stopped
     depends_on:
@@ -189,15 +187,7 @@ services:
         taskmanager.numberOfTaskSlots: 1
         taskmanager.memory.process.size: 2048m
     volumes:
-      - ./infrastructure/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-connector-kafka-5.0.0-2.1.jar:ro
-      - ./infrastructure/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:/opt/flink/lib/flink-sql-connector-kafka-5.0.0-2.1.jar:ro
-      - ./infrastructure/flink/lib/kafka-clients-4.2.0.jar:/opt/flink/lib/kafka-clients-4.2.0.jar:ro
-      - ./infrastructure/flink/lib/iceberg-flink-runtime-2.1-1.11.0.jar:/opt/flink/lib/iceberg-flink-runtime-2.1-1.11.0.jar:ro
-      - ./infrastructure/flink/lib/iceberg-aws-bundle-1.11.0.jar:/opt/flink/lib/iceberg-aws-bundle-1.11.0.jar:ro
-      - ./infrastructure/flink/lib/hadoop-client-api-3.4.3.jar:/opt/flink/lib/hadoop-client-api-3.4.3.jar:ro
-      - ./infrastructure/flink/lib/hadoop-client-runtime-3.4.3.jar:/opt/flink/lib/hadoop-client-runtime-3.4.3.jar:ro
-      - ./infrastructure/flink/lib/flink-metrics-dropwizard-2.1.0.jar:/opt/flink/lib/flink-metrics-dropwizard-2.1.0.jar:ro
-      - ./pipelines/bronze/atlas-bronze-udf.jar:/opt/flink/lib/atlas-bronze-udf.jar:ro
+      - ./pipelines:/opt/flowmart/pipelines:ro
     networks:
       - atlas-network
 
