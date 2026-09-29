@@ -603,9 +603,11 @@ Combined anomaly detection and observability validation:
 
 # 13. CI/CD
 
-GitHub Actions runs the repository's Python validation scripts and builds the custom Flink image. The image build compiles the decimal-decoder UDF and resolves the pinned connector dependencies.
+GitHub Actions validates the Compose configuration, compiles the Python modules, runs the repository's Python validation scripts, and builds the custom Flink image. The image build compiles the decimal-decoder UDF and resolves the pinned connector dependencies.
 
-The workflow does not currently launch PostgreSQL, Kafka, Debezium, Flink, Iceberg, and Trino as an integrated test environment. The service-level results below are manual validation results, not coverage provided by each CI run.
+After CI passes on `master`, the workflow publishes the Flink runtime image to GitHub Container Registry as `ghcr.io/zjxdl/flowmart-flink:latest` and tags the image with the commit SHA. The package's visibility follows the GitHub Container Registry settings.
+
+The workflow does not launch PostgreSQL, Kafka, Debezium, Flink, Iceberg, and Trino as one integrated test environment. The service-level results below are manual validation results, not coverage provided by each CI run. No cloud application deployment target is configured; the delivery step publishes the reusable Flink runtime image.
 
 Workflow: `.github/workflows/ci.yml`
 
@@ -640,6 +642,8 @@ docker compose ps
 ```
 
 The Flink image build downloads the connector dependencies and compiles the decimal-decoder UDF, so the setup does not depend on JAR files already present on your machine.
+
+The example config uses 768 MB for the Flink JobManager and 1 GB for its TaskManager to fit a small local demo. Increase `FLINK_JOBMANAGER_MEMORY` and `FLINK_TASKMANAGER_MEMORY` in `.env` for larger streaming workloads.
 
 ## Generate source data
 
@@ -699,7 +703,7 @@ docker exec -it atlas-postgres psql -U atlas -d atlas
 ## Kafka
 
 ```cmd
-docker exec atlas-kafka kafka-topics.sh --bootstrap-server kafka:9092 --list
+docker exec atlas-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
 ```
 
 ## Trino
@@ -875,3 +879,4 @@ The result is an end-to-end platform that takes operational e-commerce transacti
 ## Author
 
 Built as a portfolio data engineering project focused on modern lakehouse architecture, streaming systems, analytics engineering, and AI-powered data platforms.
+
