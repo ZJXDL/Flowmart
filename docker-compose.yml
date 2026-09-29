@@ -22,6 +22,12 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-atlas} -d ${POSTGRES_DB:-atlas}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
     networks:
       - atlas-network
 
@@ -117,6 +123,12 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
     volumes:
       - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
     networks:
       - atlas-network
 
@@ -125,8 +137,10 @@ services:
     container_name: atlas-kafka-connect
     restart: unless-stopped
     depends_on:
-      - kafka
-      - postgres
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     ports:
       - "8083:8083"
     environment:
@@ -183,9 +197,15 @@ services:
       AWS_REGION: us-east-1
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
-        jobmanager.memory.process.size: 1600m
+        jobmanager.memory.process.size: ${FLINK_JOBMANAGER_MEMORY:-768m}
     volumes:
       - ./pipelines:/opt/flowmart/pipelines:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8081/overview >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
     networks:
       - atlas-network
 
@@ -197,14 +217,15 @@ services:
     container_name: atlas-flink-taskmanager
     restart: unless-stopped
     depends_on:
-      - flink-jobmanager
+      flink-jobmanager:
+        condition: service_healthy
     command: taskmanager
     environment:
       AWS_REGION: us-east-1
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 1
-        taskmanager.memory.process.size: 2048m
+        taskmanager.memory.process.size: ${FLINK_TASKMANAGER_MEMORY:-1024m}
     volumes:
       - ./pipelines:/opt/flowmart/pipelines:ro
     networks:
@@ -218,3 +239,4 @@ volumes:
   postgres_data:
   minio_data:
   kafka_data:
+
